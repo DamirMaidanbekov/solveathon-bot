@@ -138,6 +138,48 @@ class BroadcastManager:
 # Initialize broadcast manager
 broadcast_manager = BroadcastManager(BROADCAST_SCHEDULE)
 
+# Helper functions
+def get_current_event() -> tuple[str, str]:
+    """Get current or next event from schedule"""
+    now = datetime.now()
+    current_datetime = now.strftime("%Y-%m-%d %H:%M")
+    current_time = now.strftime("%H:%M")
+    
+    # Sort schedule by datetime
+    sorted_schedule = sorted(BROADCAST_SCHEDULE.items())
+    
+    for schedule_key, message in sorted_schedule:
+        if schedule_key >= current_datetime:
+            return schedule_key, message
+    
+    # If no event found today, return first event of next day
+    if sorted_schedule:
+        return sorted_schedule[0][0], sorted_schedule[0][1]
+    
+    return "Нет событий", "Расписание пусто"
+
+def get_status_message() -> str:
+    """Get current status message"""
+    now = datetime.now()
+    current_time = now.strftime("%H:%M")
+    current_datetime = now.strftime("%Y-%m-%d %H:%M")
+    
+    # Find current or next event
+    sorted_schedule = sorted(BROADCAST_SCHEDULE.items())
+    
+    for schedule_key, message in sorted_schedule:
+        if schedule_key == current_datetime or (
+            schedule_key[:5] == current_time and len(schedule_key) == 5
+        ):
+            return f"🔴 СЕЙЧАС:\n{schedule_key}\n{message}"
+    
+    # Find next event
+    for schedule_key, message in sorted_schedule:
+        if schedule_key > current_datetime:
+            return f"⏭️ СЛЕДУЮЩЕЕ:\n{schedule_key}\n{message}"
+    
+    return "ℹ️ Событий на сегодня больше нет"
+
 # Bot handlers
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -152,49 +194,151 @@ def send_welcome(message):
     if not broadcast_manager.running:
         broadcast_manager.start()
     
-    welcome_text = """🤖 Добро пожаловать в рассылка-бота!
-
-Я буду отправлять тебе сообщения по расписанию.
-
-Команды:
-/schedule - Показать расписание сообщений
-/help - Помощь"""
+    # Create menu keyboard
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(telebot.types.KeyboardButton("📊 Текущий статус"))
+    markup.add(telebot.types.KeyboardButton("📅 Расписание"))
+    markup.add(telebot.types.KeyboardButton("❓ Помощь"))
     
-    bot.reply_to(message, welcome_text)
+    welcome_text = """🤖 Добро пожаловать в Solveathon Бота!
+
+Я буду отправлять тебе сообщения по расписанию событий.
+
+Используй кнопки меню ниже:"""
+    
+    bot.send_message(user_id, welcome_text, reply_markup=markup)
+
+@bot.message_handler(commands=['now'])
+def show_current_event(message):
+    """Show current event"""
+    status = get_status_message()
+    
+    # Create menu keyboard
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(telebot.types.KeyboardButton("📊 Текущий статус"))
+    markup.add(telebot.types.KeyboardButton("📅 Расписание"))
+    markup.add(telebot.types.KeyboardButton("❓ Помощь"))
+    
+    bot.send_message(message.chat.id, status, reply_markup=markup)
 
 @bot.message_handler(commands=['help'])
 def send_help(message):
     """Handle /help command"""
     help_text = f"""📖 Справка:
 
+🤖 **Команды:**
 /start - Начать работу с ботом
-/schedule - Показать расписание рассылки
+/now - Показать текущее событие
 /help - Эта справка
 
-Интервал проверки: {ALARM_CHECK_INTERVAL}с
-Время проверяется по текущему времени сервера."""
-    
-    bot.reply_to(message, help_text)
+**Кнопки меню:**
+📊 Текущий статус - Узнай, что происходит прямо сейчас
+📅 Расписание - Полное расписание всех событий Solveathon
+❓ Помощь - Показать эту справку
 
-@bot.message_handler(commands=['schedule'])
-def show_schedule(message):
-    """Show broadcast schedule"""
-    if not BROADCAST_SCHEDULE:
-        bot.reply_to(message, "📭 Расписание пусто")
-        return
+⏱️ Интервал проверки: {ALARM_CHECK_INTERVAL}с
+🌍 Время проверяется по текущему времени сервера"""
     
-    schedule_text = "📋 Расписание рассылки:\n\n"
-    for time_str in sorted(BROADCAST_SCHEDULE.keys()):
-        msg = BROADCAST_SCHEDULE[time_str]
-        schedule_text += f"⏰ {time_str}\n{msg}\n\n"
+    # Create menu keyboard
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(telebot.types.KeyboardButton("📊 Текущий статус"))
+    markup.add(telebot.types.KeyboardButton("📅 Расписание"))
+    markup.add(telebot.types.KeyboardButton("❓ Помощь"))
     
-    bot.reply_to(message, schedule_text)
+    bot.send_message(message.chat.id, help_text, reply_markup=markup)
+
+@bot.message_handler(func=lambda m: m.text == "📊 Текущий статус")
+def handle_status_button(message):
+    """Handle current status button"""
+    status = get_status_message()
+    
+    # Create menu keyboard
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(telebot.types.KeyboardButton("📊 Текущий статус"))
+    markup.add(telebot.types.KeyboardButton("📅 Расписание"))
+    markup.add(telebot.types.KeyboardButton("❓ Помощь"))
+    
+    bot.send_message(message.chat.id, status, reply_markup=markup)
+
+@bot.message_handler(func=lambda m: m.text == "📅 Расписание")
+def handle_schedule_button(message):
+    """Handle schedule button - send link to schedule"""
+    schedule_link = "https://solveathon.shakarim.kz/ru/schedule/"
+    
+    schedule_text = f"""📋 **Полное расписание Solveathon**
+
+Нажми на ссылку ниже, чтобы увидеть полное расписание:
+
+🔗 [{schedule_link}]({schedule_link})
+
+Там ты найдешь все мероприятия, учебные залы и времена проведения."""
+    
+    # Create menu keyboard
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(telebot.types.KeyboardButton("📊 Текущий статус"))
+    markup.add(telebot.types.KeyboardButton("📅 Расписание"))
+    markup.add(telebot.types.KeyboardButton("❓ Помощь"))
+    
+    # Also add inline button for direct link
+    inline_markup = telebot.types.InlineKeyboardMarkup()
+    inline_markup.add(telebot.types.InlineKeyboardButton(
+        "🔗 Открыть расписание",
+        url=schedule_link
+    ))
+    
+    bot.send_message(
+        message.chat.id, 
+        schedule_text, 
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+    bot.send_message(
+        message.chat.id,
+        "Или используй кнопку ниже:",
+        reply_markup=inline_markup
+    )
+
+@bot.message_handler(func=lambda m: m.text == "❓ Помощь")
+def handle_help_button(message):
+    """Handle help button"""
+    help_text = f"""📖 Справка:
+
+🤖 **Команды:**
+/start - Начать работу с ботом
+/now - Показать текущее событие
+/help - Эта справка
+
+**Кнопки меню:**
+📊 Текущий статус - Узнай, что происходит прямо сейчас
+📅 Расписание - Полное расписание всех событий Solveathon
+❓ Помощь - Показать эту справку
+
+⏱️ Интервал проверки: {ALARM_CHECK_INTERVAL}с
+🌍 Время проверяется по текущему времени сервера"""
+    
+    # Create menu keyboard
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(telebot.types.KeyboardButton("📊 Текущий статус"))
+    markup.add(telebot.types.KeyboardButton("📅 Расписание"))
+    markup.add(telebot.types.KeyboardButton("❓ Помощь"))
+    
+    bot.send_message(message.chat.id, help_text, reply_markup=markup)
 
 @bot.message_handler(func=lambda m: True)
 def handle_messages(message):
     """Handle any other message"""
-    bot.reply_to(message, 
-        "👋 Привет! Используй /help для списка команд")
+    
+    # Create menu keyboard
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(telebot.types.KeyboardButton("📊 Текущий статус"))
+    markup.add(telebot.types.KeyboardButton("📅 Расписание"))
+    markup.add(telebot.types.KeyboardButton("❓ Помощь"))
+    
+    bot.send_message(
+        message.chat.id,
+        "👋 Привет! Используй кнопки меню или команды:\n/now - текущее событие\n/help - справка",
+        reply_markup=markup
+    )
 
 # Main execution
 if __name__ == "__main__":

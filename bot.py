@@ -96,15 +96,17 @@ class BroadcastManager:
         current_time = datetime.now().strftime("%H:%M")
         current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M")
         
-        for schedule_key, message in self.schedule.items():
+        for schedule_key, event_data in self.schedule.items():
             # Check for specific date+time (YYYY-MM-DD HH:MM)
             if len(schedule_key) == 16 and ' ' in schedule_key:  # "YYYY-MM-DD HH:MM"
                 if schedule_key == current_datetime and schedule_key not in self.sent_dates:
+                    message = event_data.get('message', event_data.get('title', ''))
                     self._send_to_all_users(message, schedule_key)
                     self.sent_dates.add(schedule_key)
             # Check for daily time (HH:MM)
             elif len(schedule_key) == 5 and ':' in schedule_key:  # "HH:MM"
                 if schedule_key == current_time and schedule_key not in self.sent_times:
+                    message = event_data.get('message', event_data.get('title', ''))
                     self._send_to_all_users(message, schedule_key)
                     self.sent_times.add(schedule_key)
         
@@ -139,46 +141,44 @@ class BroadcastManager:
 broadcast_manager = BroadcastManager(BROADCAST_SCHEDULE)
 
 # Helper functions
-def get_current_event() -> tuple[str, str]:
+def get_current_event() -> tuple[str, dict]:
     """Get current or next event from schedule"""
     now = datetime.now()
     current_datetime = now.strftime("%Y-%m-%d %H:%M")
-    current_time = now.strftime("%H:%M")
     
     # Sort schedule by datetime
     sorted_schedule = sorted(BROADCAST_SCHEDULE.items())
     
-    for schedule_key, message in sorted_schedule:
+    for schedule_key, event_data in sorted_schedule:
         if schedule_key >= current_datetime:
-            return schedule_key, message
+            return schedule_key, event_data
     
     # If no event found today, return first event of next day
     if sorted_schedule:
         return sorted_schedule[0][0], sorted_schedule[0][1]
     
-    return "Нет событий", "Расписание пусто"
+    return "Нет событий", {"title": "Расписание пусто", "location": "", "message": ""}
 
 def get_status_message() -> str:
-    """Get current status message"""
+    """Get current status message - only current event"""
     now = datetime.now()
-    current_time = now.strftime("%H:%M")
     current_datetime = now.strftime("%Y-%m-%d %H:%M")
     
-    # Find current or next event
+    # Find current event
     sorted_schedule = sorted(BROADCAST_SCHEDULE.items())
     
-    for schedule_key, message in sorted_schedule:
-        if schedule_key == current_datetime or (
-            schedule_key[:5] == current_time and len(schedule_key) == 5
-        ):
-            return f"🔴 СЕЙЧАС:\n{schedule_key}\n{message}"
+    # Check if any event is happening now
+    for schedule_key, event_data in sorted_schedule:
+        if schedule_key == current_datetime:
+            return (
+                f"🔴 <b>СЕЙЧАС:</b>\n\n"
+                f"⏰ <b>{schedule_key}</b>\n"
+                f"📍 <b>{event_data['title']}</b>\n"
+                f"🏠 <i>Место: {event_data['location']}</i>"
+            )
     
-    # Find next event
-    for schedule_key, message in sorted_schedule:
-        if schedule_key > current_datetime:
-            return f"⏭️ СЛЕДУЮЩЕЕ:\n{schedule_key}\n{message}"
-    
-    return "ℹ️ Событий на сегодня больше нет"
+    # If no current event, show message
+    return "ℹ️ <i>Нет текущего события</i>"
 
 # Bot handlers
 @bot.message_handler(commands=['start'])
@@ -219,7 +219,7 @@ def show_current_event(message):
     markup.add(telebot.types.KeyboardButton("📅 Расписание"))
     markup.add(telebot.types.KeyboardButton("❓ Помощь"))
     
-    bot.send_message(message.chat.id, status, reply_markup=markup)
+    bot.send_message(message.chat.id, status, reply_markup=markup, parse_mode="HTML")
 
 @bot.message_handler(commands=['help'])
 def send_help(message):
@@ -258,7 +258,7 @@ def handle_status_button(message):
     markup.add(telebot.types.KeyboardButton("📅 Расписание"))
     markup.add(telebot.types.KeyboardButton("❓ Помощь"))
     
-    bot.send_message(message.chat.id, status, reply_markup=markup)
+    bot.send_message(message.chat.id, status, reply_markup=markup, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: m.text == "📅 Расписание")
 def handle_schedule_button(message):

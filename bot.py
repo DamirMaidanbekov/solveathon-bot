@@ -19,14 +19,17 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 # Database management
 class Database:
-    """Database for storing users"""
+    """Database for storing users and groups"""
+    
+    USERS_FILE = USERS_DB_FILE
+    GROUPS_FILE = "groups.json"
     
     @staticmethod
     def load_users() -> Dict:
         """Load users from JSON file"""
-        if os.path.exists(USERS_DB_FILE):
+        if os.path.exists(Database.USERS_FILE):
             try:
-                with open(USERS_DB_FILE, 'r') as f:
+                with open(Database.USERS_FILE, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except:
                 return {}
@@ -35,8 +38,25 @@ class Database:
     @staticmethod
     def save_users(users: Dict):
         """Save users to JSON file"""
-        with open(USERS_DB_FILE, 'w') as f:
+        with open(Database.USERS_FILE, 'w', encoding='utf-8') as f:
             json.dump(users, f, ensure_ascii=False, indent=2)
+    
+    @staticmethod
+    def load_groups() -> Dict:
+        """Load groups from JSON file"""
+        if os.path.exists(Database.GROUPS_FILE):
+            try:
+                with open(Database.GROUPS_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+    
+    @staticmethod
+    def save_groups(groups: Dict):
+        """Save groups to JSON file"""
+        with open(Database.GROUPS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(groups, f, ensure_ascii=False, indent=2)
     
     @staticmethod
     def add_user(user_id: int, username: str = ""):
@@ -52,10 +72,27 @@ class Database:
         print(f"✅ User {user_id} ({username}) registered")
     
     @staticmethod
+    def add_group(group_id: int, group_name: str = ""):
+        """Add or update group in database"""
+        groups = Database.load_groups()
+        groups[str(group_id)] = {
+            "group_id": group_id,
+            "active": True
+        }
+        Database.save_groups(groups)
+        print(f"✅ Group {group_id} ({group_name}) registered")
+    
+    @staticmethod
     def get_all_user_ids() -> List[int]:
         """Get all registered user IDs"""
         users = Database.load_users()
         return [int(uid) for uid in users.keys() if users[uid].get("active", True)]
+    
+    @staticmethod
+    def get_all_group_ids() -> List[int]:
+        """Get all registered group IDs"""
+        groups = Database.load_groups()
+        return [int(gid) for gid in groups.keys() if groups[gid].get("active", True)]
 
 # Broadcast manager
 class BroadcastManager:
@@ -101,38 +138,51 @@ class BroadcastManager:
             if len(schedule_key) == 16 and ' ' in schedule_key:  # "YYYY-MM-DD HH:MM"
                 if schedule_key == current_datetime and schedule_key not in self.sent_dates:
                     message = event_data.get('message', event_data.get('title', ''))
-                    self._send_to_all_users(message, schedule_key)
+                    self._send_to_all(message, schedule_key)
                     self.sent_dates.add(schedule_key)
             # Check for daily time (HH:MM)
             elif len(schedule_key) == 5 and ':' in schedule_key:  # "HH:MM"
                 if schedule_key == current_time and schedule_key not in self.sent_times:
                     message = event_data.get('message', event_data.get('title', ''))
-                    self._send_to_all_users(message, schedule_key)
+                    self._send_to_all(message, schedule_key)
                     self.sent_times.add(schedule_key)
         
         # Clean up sent_times if time has passed (reset at midnight)
         if datetime.now().strftime("%H:%M") == "00:00":
             self.sent_times.clear()
     
-    def _send_to_all_users(self, message: str, send_time: str):
-        """Send message to all registered users"""
+    def _send_to_all(self, message: str, send_time: str):
+        """Send message to all registered users and groups"""
         user_ids = Database.get_all_user_ids()
+        group_ids = Database.get_all_group_ids()
         
-        if not user_ids:
-            print(f"⚠️  No active users to send broadcast at {send_time}")
+        total_recipients = len(user_ids) + len(group_ids)
+        
+        if total_recipients == 0:
+            print(f"⚠️  No active users or groups to send broadcast at {send_time}")
             return
         
         sent_count = 0
         failed_count = 0
         
-        print(f"📢 Broadcasting at {send_time} to {len(user_ids)} users...")
+        print(f"📢 Broadcasting at {send_time} to {len(user_ids)} users and {len(group_ids)} groups...")
         
+        # Send to users
         for uid in user_ids:
             try:
                 bot.send_message(uid, message)
                 sent_count += 1
             except Exception as e:
                 print(f"❌ Error sending to user {uid}: {e}")
+                failed_count += 1
+        
+        # Send to groups
+        for gid in group_ids:
+            try:
+                bot.send_message(gid, message)
+                sent_count += 1
+            except Exception as e:
+                print(f"❌ Error sending to group {gid}: {e}")
                 failed_count += 1
         
         print(f"✅ Broadcast completed: {sent_count} sent, {failed_count} failed")
@@ -339,6 +389,39 @@ def handle_messages(message):
         "👋 Привет! Используй кнопки меню или команды:\n/now - текущее событие\n/help - справка",
         reply_markup=markup
     )
+
+# Group management handlers
+@bot.message_handler(content_types=['group_chat_created'])
+def handle_group_created(message):
+    """Handle when bot is added to a group"""
+    group_id = message.chat.id
+    group_name = message.chat.title or f"Group {group_id}"
+    
+    Database.add_group(group_id, group_name)
+    
+    bot.send_message(
+        group_id,
+        f"🤖 Привет! Я добавлен в группу <b>{group_name}</b>\n\n"
+        f"Я буду отправлять сообщения о расписании событий Solveathon сюда!",
+        parse_mode="HTML"
+    )
+
+@bot.message_handler(content_types=['new_chat_members'])
+def handle_new_chat_members(message):
+    """Handle when bot joins a group"""
+    for member in message.new_chat_members:
+        if member.is_bot and member.username == bot.get_me().username:
+            group_id = message.chat.id
+            group_name = message.chat.title or f"Group {group_id}"
+            
+            Database.add_group(group_id, group_name)
+            
+            bot.send_message(
+                group_id,
+                f"🤖 Привет! Я добавлен в группу <b>{group_name}</b>\n\n"
+                f"Я буду отправлять сообщения о расписании событий Solveathon сюда!",
+                parse_mode="HTML"
+            )
 
 # Main execution
 if __name__ == "__main__":
